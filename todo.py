@@ -7,7 +7,6 @@ import sys
 import timeit
 import traceback
 import time
-import cProfile
 
 # todo item definition 
 @dataclass
@@ -362,12 +361,6 @@ def repl():
             elif op == 'cache':  # print cache stats
                 print("cache hits/misses: {}/{}".format(cache_stats['hits'], cache_stats['misses']))
 
-            elif op == 'b' or op == 'bench':
-                for i in range(1000):
-                    gather_all_tags()
-                for i in range(1000):
-                    calc_all_past_times()
-                                
             elif op == 'h' or op == 'help':
                 
                 print("      l - list todo items")
@@ -394,4 +387,4 @@ def main(f):
 
 
 if __name__ == '__main__':
-    cProfile.run("main(sys.argv[1])")
+    main(sys.argv[1])

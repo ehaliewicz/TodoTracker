@@ -25,6 +25,9 @@ class TodoItem:
     def finish(self):
         self.finished = True
 
+    def clone(self):
+        return TodoItem(name=self.name, duration=self.duration, finished=self.finished, tag=self.tag)
+    
     def finish_with_custom_duration(self, duration):
         self.duration = duration
         self.finished = True
@@ -350,6 +353,20 @@ def repl():
                 
                 save_todo_log(todos)
                 print_todos(todos)
+                
+            elif op == 'cd':  # duplicate an item and mark it as complete 
+                if len(params) != 1:
+                    raise Exception("No task specified")
+                
+                idx = int(params[0])
+                todos = read_cur_todo_log()
+
+                ntodo = todos[idx].clone()
+                todos.insert(idx+1, ntodo)
+                todos[idx+1].finish()
+                
+                save_todo_log(todos)
+                print_todos(todos)
 
             elif op == 'ct':
                 if len(params) != 2:
@@ -413,6 +430,7 @@ Syntax
 """)
                 print("     l                - list todo items")
                 print("     c {num}          - complete a todo item")
+                print("    cd {num}          - complete a duplicate of a todo item")
                 print("     c {num} {time}m  - complete a todo item with a specified time in minutes")
                 print("    uc {num}          - un-complete a todo item") 
                 print("  time                - show time spent today")

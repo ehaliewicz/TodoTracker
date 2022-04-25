@@ -110,7 +110,7 @@ def skip_whitespace(line):
     return line[idx:]
 
 def parse_time(time_str):
-    assert time_str[-1] == 'm'
+    assert time_str[-1] == 'm', "Expected time with 'm' suffix"
     return int(time_str[:-1])
     
 ### parsing and unparsing
@@ -328,6 +328,7 @@ def repl():
                 raise Exception("Empty command.")
             op = cmd[0]
             params = cmd[1:]
+
             # commands are
             if op == 'l':  # list items
                 print_todos(read_cur_todo_log())
@@ -377,7 +378,6 @@ def repl():
                 time_duration = parse_time(time_str)
 
                 todos = read_cur_todo_log()
-
                 todos[idx].finish_with_custom_duration(time_duration)
                 save_todo_log(todos)
                 print_todos(todos)

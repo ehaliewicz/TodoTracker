@@ -25,6 +25,13 @@ class TodoItem:
     def finish(self):
         self.finished = True
 
+    def finish_with_custom_duration(self, duration):
+        self.duration = duration
+        self.finished = True
+
+    def uncomplete(self):
+        self.finished = False
+
     def __str__(self):
         tag_str = ""
         if self.tag != "":
@@ -38,9 +45,6 @@ class TodoItem:
         
 # file caching
 parsed_file_cache = {}
-
-#def add_file_to_cache(f, read_time, parsed):
-#    parsed_file_cache[f] = (read_time, parsed)
 
 def clear_file_in_cache(f):
     if f in parsed_file_cache:
@@ -102,6 +106,10 @@ def skip_whitespace(line):
         
     return line[idx:]
 
+def parse_time(time_str):
+    assert time_str[-1] == 'm'
+    return int(time_str[:-1])
+    
 ### parsing and unparsing
 def parse_todo_line(line):
     line = skip_char('#', line)
@@ -116,18 +124,15 @@ def parse_todo_line(line):
 
     line = skip_whitespace(line)
 
-    #todo_name, line = capture_until('(', line)
     spl = line.split(" (", 1)
     todo_name, line = spl[0],spl[1]
     
     todo_name = todo_name.rstrip()
     
-    #line = skip_char('(', line)
-    #time, line = capture_until(')', line)
     spl = line.split(")", 1)
     time,line = spl[0],spl[1]
-    assert time[-1] == 'm'
-    time_duration = int(time[:-1])
+
+    time_duration = parse_time(time)
         
     line = skip_whitespace(line)
 
@@ -245,12 +250,6 @@ def calc_all_past_times():
     return sum(calc_time(todo_log) for todo_log in all_todo_logs), days
 
 
-def complete_todo(todos, params):
-    assert len(params) == 1
-    idx = int(params[0])
-
-    todos[idx].finish()
-
 def print_todos(todos):
     print(serialize_todos(todos, True))
     task_pct,time_pct = calc_percentage(todos)
@@ -265,7 +264,6 @@ def print_tags_inner(cnt_tbl, time_tbl):
         time_str = "{}m / {:.2f}hr".format(time, time/60)
         cnt_str = "{} {}(s)".format(cnt, tag).rjust(25)
         s += "{}: {}\n".format(cnt_str, time_str)
-        #s += "{} {}(s): {} \n".format(tag.rjust(20), cnt, time_str)
     print(s)
     
 def print_tags(todos):
@@ -331,12 +329,39 @@ def repl():
             if op == 'l':  # list items
                 print_todos(read_cur_todo_log())
 
-            elif op == 'c':  # mark an item as complete
-                if len(params) == 0:
+            elif op == 'uc': # unmark an item as complete
+                if len(params) != 1:
                     raise Exception("No task specified")
-    
+                idx = int(params[0])
                 todos = read_cur_todo_log()
-                complete_todo(todos, params)
+                todos[idx].uncomplete()
+                
+                
+                save_todo_log(todos)
+                print_todos(todos)                
+
+            elif op == 'c':  # mark an item as complete
+                if len(params) != 1:
+                    raise Exception("No task specified")
+
+                idx = int(params[0])
+                todos = read_cur_todo_log()
+                todos[idx].finish()
+                
+                save_todo_log(todos)
+                print_todos(todos)
+
+            elif op == 'ct':
+                if len(params) != 2:
+                    raise Exception("No task and/or time specified")
+
+                idx = int(params[0])
+                time_str = params[1]
+                time_duration = parse_time(time_str)
+
+                todos = read_cur_todo_log()
+
+                todos[idx].finish_with_custom_duration(time_duration)
                 save_todo_log(todos)
                 print_todos(todos)
                 
@@ -362,16 +387,41 @@ def repl():
                 print("cache hits/misses: {}/{}".format(cache_stats['hits'], cache_stats['misses']))
 
             elif op == 'h' or op == 'help':
+                print(
+"""
+                TODO TRACKER
                 
-                print("      l - list todo items")
-                print("c {num} - complete a todo item")
-                print("   time - show time spent today")
-                print("  ctime - show cumulative time for all days")
-                print("   tags - show completed task tags for today")
-                print("  ctags - show completed task tags for all days")
-                print("  cache - show cache info")
-                print("     q - quit")
-                print("h/help - show this help screen")
+Parses a list of lines from a todo file, lets you mark them as complete, 
+and automatically creates logs to track historical progress.
+            
+Usage
+                todo.py todo_list_file
+Syntax
+    ### - start or end block comment
+                
+    # - Denotes a todo item, followed by the name and the time formatted like '(15m)'  
+        Can be optionally tagged like %tag-1 (the tag must be the last part of the line)
+        e.g.
+              # listen to podcast (15m)
+              # watch an episode of a tv show (20m) %tv-show
+                
+                
+    # DONE - Used by the program to mark a completed todo item in a log.  Save syntax as above.
+                
+    - Anything else is considered a comment.
+                
+""")
+                print("     l                - list todo items")
+                print("     c {num}          - complete a todo item")
+                print("     c {num} {time}m  - complete a todo item with a specified time in minutes")
+                print("    uc {num}          - un-complete a todo item") 
+                print("  time                - show time spent today")
+                print(" ctime                - show cumulative time for all days")
+                print("  tags                - show completed task tags for today")
+                print(" ctags                - show completed task tags for all days")
+                print(" cache                - show cache info")
+                print("     q                - quit")
+                print("h/help                - show this help screen")
 
             else:
                 raise Exception("Unknown command '{}'".format(op))

@@ -367,11 +367,12 @@ def repl(todo_list_file, config):
                 todos.insert(idx+1, ntodo)
 
             def new_todo_item(todos):
-                
                 l = line.split("{} ".format(op), 1)[1]
-                
                 todo_item = parse_todo_line(l)
                 todos.append(todo_item)
+
+            def delete_todo_item(todos, idx):
+                del todos[idx]                
 
             def print_time():
                 t = calc_time(read_cur_todo_log(todo_list_file))
@@ -440,7 +441,8 @@ Syntax
                     lambda todos, idx, dur: todos[idx].complete_with_custom_duration(dur)
                 ),
                 'new': todo_op(0, new_todo_item),
-
+                'delete': todo_op(1, delete_todo_item),
+                
                 'time':            lambda params: print_time(),
                 'cumulative-time': lambda params: print_cumulative_time(),
                 'tags':            lambda params: print_tags(read_cur_todo_log(todo_list_file)),

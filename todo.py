@@ -1,5 +1,7 @@
+import argparse
 from dataclasses import dataclass
 import datetime
+import json
 import os
 import stat
 import re
@@ -22,13 +24,13 @@ class TodoItem:
     def is_done(self):
         return self.finished
 
-    def finish(self):
+    def complete(self):
         self.finished = True
 
     def clone(self):
         return TodoItem(name=self.name, duration=self.duration, finished=self.finished, tag=self.tag)
     
-    def finish_with_custom_duration(self, duration):
+    def complete_with_custom_duration(self, duration):
         self.duration = duration
         self.finished = True
 
@@ -215,11 +217,11 @@ def serialize_todos(todos, repl=False):
     return res
 
 
-def read_cur_todo_log():
+def read_cur_todo_log(todo_list_file):
     # if log for today exists, read that instead of the original todo list
     f = get_log_filename()
     if not os.path.exists(f):
-        f = sys.argv[1]
+        f = todo_list_file
     return read_todo_file(f)
 
 def read_todo_file(file):
@@ -229,6 +231,21 @@ def read_todo_file(file):
 
     return cache_fetch_or_calculate(file, inner)
 
+def read_config_file(cfg_file):
+    if not os.path.exists(cfg_file):
+        return DEFAULT_CONFIG
+
+    with open(cfg_file) as f:
+        raw_config = json.load(f)
+
+    cfg = {}
+    for cmd,keyword_list in raw_config.items():
+        for keyword in keyword_list:
+            if keyword in cfg:
+                raise Exception("Duplicate key command '{}' in config".format(keyword))
+            cfg[keyword] = cmd
+    return cfg
+    
 
 def calc_percentage(todos):
     total_items = len(todos)
@@ -312,15 +329,14 @@ def gather_all_tags():
 
 
 
-def repl():
-    print_todos(read_cur_todo_log())
+def repl(todo_list_file, config):
+    print_todos(read_cur_todo_log(todo_list_file))
     
     while True:
 
         line = input("> ")
         cmd = line.rstrip().split()
 
-        
         
         try:
             
@@ -329,81 +345,50 @@ def repl():
             op = cmd[0]
             params = cmd[1:]
 
-            # commands are
-            if op == 'l':  # list items
-                print_todos(read_cur_todo_log())
+            def todo_op(num_params, func):
+                def inner(params):
+                    if num_params != 0:
+                        if len(params) != num_params:
+                            raise Exception("Invalid number of parameters supplied.")
+                        params = (int(p) for p in params)
+                    else:
+                        params = []
+                    
+                    todos = read_cur_todo_log(todo_list_file)
+                                
+                    func(todos, *params)
+                    save_todo_log(todos)
+                    print_todos(todos)
 
-            elif op == 'uc': # unmark an item as complete
-                if len(params) != 1:
-                    raise Exception("No task specified")
-                idx = int(params[0])
-                todos = read_cur_todo_log()
-                todos[idx].uncomplete()
-                
-                
-                save_todo_log(todos)
-                print_todos(todos)                
-
-            elif op == 'c':  # mark an item as complete
-                if len(params) != 1:
-                    raise Exception("No task specified")
-
-                idx = int(params[0])
-                todos = read_cur_todo_log()
-                todos[idx].finish()
-                
-                save_todo_log(todos)
-                print_todos(todos)
-                
-            elif op == 'cd':  # duplicate an item and mark it as complete 
-                if len(params) != 1:
-                    raise Exception("No task specified")
-                
-                idx = int(params[0])
-                todos = read_cur_todo_log()
-
+                return inner
+        
+            def duplicate(todos, idx):
                 ntodo = todos[idx].clone()
                 todos.insert(idx+1, ntodo)
-                todos[idx+1].finish()
+
+            def new_todo_item(todos):
                 
-                save_todo_log(todos)
-                print_todos(todos)
-
-            elif op == 'ct':
-                if len(params) != 2:
-                    raise Exception("No task and/or time specified")
-
-                idx = int(params[0])
-                time_str = params[1]
-                time_duration = parse_time(time_str)
-
-                todos = read_cur_todo_log()
-                todos[idx].finish_with_custom_duration(time_duration)
-                save_todo_log(todos)
-                print_todos(todos)
+                l = line.split("{} ".format(op), 1)[1]
                 
-            elif op == 'time':  # time for today
-                t = calc_time(read_cur_todo_log())
+                todo_item = parse_todo_line(l)
+                todos.append(todo_item)
+
+            def print_time():
+                t = calc_time(read_cur_todo_log(todo_list_file))
                 print("Today's time: {}m / {:.2f}hr".format(t, t/60))
-                
-            elif op == 'ctime':  # cumulative time
+
+            def print_cumulative_time():
                 time,days = calc_all_past_times()
                 hours = time/60
                 hours_per_day = time/days/60
                 print("Cumulative time: {}m / {:.2f}hr over {} days".format(time, time/60, days))
                 print("{:.2f} hours per day avg.".format(hours_per_day))
-            elif op == 'tags':
-                print_tags(read_cur_todo_log())
 
-            elif op == 'ctags':
-                print_all_tags()
-                
-            elif op == 'q': # quit
-                break 
-            elif op == 'cache':  # print cache stats
+            def cache_info(params):
                 print("cache hits/misses: {}/{}".format(cache_stats['hits'], cache_stats['misses']))
 
-            elif op == 'h' or op == 'help':
+
+            def print_help(params):
                 print(
 """
                 TODO TRACKER
@@ -428,31 +413,70 @@ Syntax
     - Anything else is considered a comment.
                 
 """)
-                print("     l                - list todo items")
-                print("     c {num}          - complete a todo item")
-                print("    cd {num}          - complete a duplicate of a todo item")
-                print("     c {num} {time}m  - complete a todo item with a specified time in minutes")
-                print("    uc {num}          - un-complete a todo item") 
-                print("  time                - show time spent today")
-                print(" ctime                - show cumulative time for all days")
-                print("  tags                - show completed task tags for today")
-                print(" ctags                - show completed task tags for all days")
-                print(" cache                - show cache info")
-                print("     q                - quit")
-                print("h/help                - show this help screen")
+                
+                print("  list                  - list todo items")
+                print("complete {num}          - complete a todo item")
+                print("      ct {num} {time}   - complete a todo item with a specified time in minutes")
+                print("    dupe {num}          - complete a duplicate of a todo item")
+                print("      uc {num}          - un-complete a todo item") 
+                print("     new {task-syntax}  - add a new task")
+                print("    time                - show time spent today")
+                print("   ctime                - show cumulative time for all days")
+                print("    tags                - show completed task tags for today")
+                print("   ctags                - show completed task tags for all days")
+                print("   cache-info           - show cache info")
+                print("    quit                - quit")
+                print("  h/help                - show this help screen")
 
-            else:
-                raise Exception("Unknown command '{}'".format(op))
+
+            cmd_table = {
+                'list': lambda params: print_todos(read_cur_todo_log(todo_list_file)),
+                'complete': todo_op(1, lambda todos, idx: todos[idx].complete()),
+                'uncomplete': todo_op(1, lambda todos, idx: todos[idx].uncomplete()),
+                'duplicate': todo_op(1, duplicate),
+                'quit': lambda p: sys.exit(),
+                'complete-custom-duration': todo_op(
+                    2,
+                    lambda todos, idx, dur: todos[idx].complete_with_custom_duration(dur)
+                ),
+                'new': todo_op(0, new_todo_item),
+
+                'time':            lambda params: print_time(),
+                'cumulative-time': lambda params: print_cumulative_time(),
+                'tags':            lambda params: print_tags(read_cur_todo_log(todo_list_file)),
+                'cumulative-tags': lambda params: print_all_tags(),
+                'cache-info':      cache_info,
+                'help':            print_help,
+                
+            
+            }
+
+            if op not in config:
+                raise Exception("Unknown keyword '{}'".format(op))
+            
+            cmd_str = config[op]
+
+            if cmd_str not in cmd_table:
+                raise Exception("Unknown command '{}'".format(cmd_str))
+                
+            cmd_table[cmd_str](params)
             
         except Exception as e:
             print(str(e))
             
 
-def main(f):
-    todos = read_cur_todo_log()
+def main(todo_list_file, config_file):
+    todos = read_cur_todo_log(todo_list_file)
+    cfg = read_config_file(config_file)
     save_todo_log(todos)
-    repl()
+    
+    repl(todo_list_file=todo_list_file, config=cfg)
 
+
+parser = argparse.ArgumentParser(description='Track todo items and time.')
+parser.add_argument('--todo', metavar='todo_list_file', type=str, default='todo_list.txt')
+parser.add_argument('--config', metavar='config_file', type=str, default='config.json')
 
 if __name__ == '__main__':
-    main(sys.argv[1])
+    args = parser.parse_args()
+    main(todo_list_file=args.todo, config_file=args.config)

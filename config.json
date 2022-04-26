@@ -1,0 +1,15 @@
+{
+    "list":            ["l", "list"],
+    "complete":        ["c", "complete"],
+    "complete-custom-duration": ["ct", "complete-time"],
+    "duplicate":       ["dupe", "duplicate"],
+    "uncomplete":      ["uc", "uncomplete"],
+    "new":             ["n", "new"],
+    "time":            ["t", "time"],
+    "cumulative-time": ["ctime", "cumulative-time"],
+    "tags":            ["tags"],
+    "cumulative-tags": ["ctags", "cumulative-tags"],
+    "cache-info":      ["cache"],
+    "quit":            ["q", "quit"],
+    "help":            ["h", "help"]
+}

@@ -372,18 +372,23 @@ def repl(todo_list_file, config):
                 todos.append(todo_item)
 
             def delete_todo_item(todos, idx):
-                del todos[idx]                
+                del todos[idx]
 
+            def get_hr_min(m):
+                return int(m//60),int(m%60)
+                
             def print_time():
                 t = calc_time(read_cur_todo_log(todo_list_file))
-                print("Today's time: {}m / {:.2f}hr".format(t, t/60))
+                hr,m = get_hr_min(t)
+                print("Today's time: {}m / {}h{}m".format(t, hr,m))
 
             def print_cumulative_time():
                 time,days = calc_all_past_times()
-                hours = time/60
-                hours_per_day = time/days/60
-                print("Cumulative time: {}m / {:.2f}hr over {} days".format(time, time/60, days))
-                print("{:.2f} hours per day avg.".format(hours_per_day))
+                hr,m = get_hr_min(time)
+                minutes_per_day = time/days
+                hrd,md = get_hr_min(minutes_per_day)
+                print("Cumulative time: {}m / {}hr{}m over {} days".format(time, hr, m, days))
+                print("{}h{}m per day avg.".format(hrd, md))
 
             def cache_info(params):
                 print("cache hits/misses: {}/{}".format(cache_stats['hits'], cache_stats['misses']))

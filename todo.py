@@ -1,14 +1,17 @@
 import argparse
 from dataclasses import dataclass
 import datetime
+import itertools
 import json
 import os
 import stat
 import re
+import sqlite_support
 import sys
 import timeit
 import traceback
 import time
+
 
 # todo item definition 
 @dataclass
@@ -17,9 +20,10 @@ class TodoItem:
     duration: int
     finished: bool
     tag: str
+    date: datetime.date
 
     def time(self):
-        return self.duration if self.finished else 0 
+        return self.duration if self.finished else 0
 
     def is_done(self):
         return self.finished
@@ -28,7 +32,9 @@ class TodoItem:
         self.finished = True
 
     def clone(self):
-        return TodoItem(name=self.name, duration=self.duration, finished=self.finished, tag=self.tag)
+        return TodoItem(
+            name=self.name, duration=self.duration,
+            finished=self.finished, tag=self.tag, date=self.date)
     
     def complete_with_custom_duration(self, duration):
         self.duration = duration
@@ -46,8 +52,12 @@ class TodoItem:
             return "DONE {} ({}m) {}".format(self.name, self.duration, tag_str)
         else:
             return "{} ({}m) {}".format(self.name, self.duration, tag_str)
-    
-        
+
+    def to_db_tuple(self, day):
+        return (self.name, 1 if self.finished else 0, self.duration, self.tag, day)
+
+
+
 # file caching
 parsed_file_cache = {}
 
@@ -116,7 +126,7 @@ def parse_time(time_str):
     return int(time_str[:-1])
     
 ### parsing and unparsing
-def parse_todo_line(line):
+def parse_todo_line(line, date):
     line = skip_char('#', line)
     line = skip_whitespace(line)
 
@@ -147,10 +157,10 @@ def parse_todo_line(line):
         line = skip_char('%', line)
         tag = line.strip()
     
-    return TodoItem(name=todo_name, duration=time_duration, finished=done, tag=tag)
+    return TodoItem(name=todo_name, duration=time_duration, finished=done, tag=tag, date=date)
 
 
-def read_todo_lines(lines):
+def read_todo_lines(lines, date):
     """ Parses a list of lines from a todo file into a list of TodoItem(s)
 
     SYNTAX = 
@@ -183,7 +193,7 @@ def read_todo_lines(lines):
 
         # parse a todo item
         elif spl[0] == '#':
-            todo_item = parse_todo_line(line)
+            todo_item = parse_todo_line(line, date)
             
             todos.append(todo_item)
 
@@ -222,12 +232,13 @@ def read_cur_todo_log(todo_list_file):
     f = get_log_filename()
     if not os.path.exists(f):
         f = todo_list_file
-    return read_todo_file(f)
+    cur_date = datetime.date.today()
+    return read_todo_file(f, cur_date)
 
-def read_todo_file(file):
+def read_todo_file(file, date):
     def inner():
         with open(file) as f:
-            return read_todo_lines((line for line in f))
+            return read_todo_lines((line for line in f), date)
 
     return cache_fetch_or_calculate(file, inner)
 
@@ -258,17 +269,24 @@ def calc_percentage(todos):
     return tasks_pct, time_pct
 
 def calc_time(todos):
-    return sum(todo.time() for todo in todos)
-
+    completed = sum(todo.time() for todo in todos)
+    total = sum(todo.duration for todo in todos)
+    return completed, total
+    
 
 def read_all_log_files():
-    return (read_todo_file(f) for f in os.listdir(".") if f.endswith("_log.txt"))
+    return (read_todo_file(f, f.split("_log.txt")[0]) for f in os.listdir(".") if f.endswith("_log.txt"))
 
 def calc_all_past_times():
     all_todo_logs = list(read_all_log_files())
     days = len(all_todo_logs)
-    return sum(calc_time(todo_log) for todo_log in all_todo_logs), days
 
+    times_a, times_b = itertools.tee(calc_time(todo_log) for todo_log in all_todo_logs)
+    completed, totals = (x[0] for x in times_a), (y[1] for y in times_b)
+
+    #return sum(calc_time(todo_log) for todo_log in all_todo_logs), days
+    return sum(completed), sum(totals), days
+    
 
 def print_todos(todos):
     print(serialize_todos(todos, True))
@@ -368,7 +386,8 @@ def repl(todo_list_file, config):
 
             def new_todo_item(todos):
                 l = line.split("{} ".format(op), 1)[1]
-                todo_item = parse_todo_line(l)
+                cur_date = datetime.date.today()
+                todo_item = parse_todo_line(l, cur_date)
                 todos.append(todo_item)
 
             def delete_todo_item(todos, idx):
@@ -378,18 +397,25 @@ def repl(todo_list_file, config):
                 return int(m//60),int(m%60)
                 
             def print_time():
-                t = calc_time(read_cur_todo_log(todo_list_file))
-                hr,m = get_hr_min(t)
-                print("Today's time: {}m / {}h{}m".format(t, hr,m))
+                completed,total = calc_time(read_cur_todo_log(todo_list_file))
+                hr,m = get_hr_min(completed)
+                thr,tm = get_hr_min(total)
+                print("Today's time: {}m / {}h{}m out of {}h{}m".format(completed, hr,m, thr,tm))
 
             def print_cumulative_time():
-                time,days = calc_all_past_times()
-                hr,m = get_hr_min(time)
-                minutes_per_day = time/days
-                hrd,md = get_hr_min(minutes_per_day)
-                print("Cumulative time: {}m / {}hr{}m over {} days".format(time, hr, m, days))
-                print("{}h{}m per day avg.".format(hrd, md))
+                comp_mins, total_mins, num_days = calc_all_past_times()
+                #completed,total,days = calc_all_past_times()
+                comp_hr,comp_rem_mins = get_hr_min(comp_mins)
 
+                mins_per_day = comp_mins/num_days
+                
+                hrd,md = get_hr_min(mins_per_day)
+
+                print("Cuulative time: {}m / {}h{}m over {} days".format(
+                    comp_mins, comp_hr, comp_rem_mins, num_days
+                ))
+                print("{}h{}m per day avg.".format(hrd, md))
+                
             def cache_info(params):
                 print("cache hits/misses: {}/{}".format(cache_stats['hits'], cache_stats['misses']))
 

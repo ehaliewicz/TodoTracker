@@ -6,11 +6,20 @@ import json
 import os
 import stat
 import re
-import sqlite_support
 import sys
 import timeit
 import traceback
 import time
+
+VERSION = "0.3"
+
+
+# new   - create new item
+# desc  - update description
+# comp  - toggle completion
+# time  - set time
+# tag   - set tag
+# clone - add new entry based on item
 
 
 # todo item definition 
@@ -20,7 +29,7 @@ class TodoItem:
     duration: int
     finished: bool
     tag: str
-    date: datetime.date
+    
 
     def time(self):
         return self.duration if self.finished else 0
@@ -28,17 +37,16 @@ class TodoItem:
     def is_done(self):
         return self.finished
 
-    def complete(self):
-        self.finished = True
+    def toggle_complete(self):
+        self.finished = not self.finished
 
     def clone(self):
         return TodoItem(
             name=self.name, duration=self.duration,
-            finished=self.finished, tag=self.tag, date=self.date)
+            finished=self.finished, tag=self.tag)
     
-    def complete_with_custom_duration(self, duration):
+    def set_duration(self, duration):
         self.duration = duration
-        self.finished = True
 
     def uncomplete(self):
         self.finished = False
@@ -126,7 +134,7 @@ def parse_time(time_str):
     return int(time_str[:-1])
     
 ### parsing and unparsing
-def parse_todo_line(line, date):
+def parse_todo_line(line):
     line = skip_char('#', line)
     line = skip_whitespace(line)
 
@@ -157,10 +165,10 @@ def parse_todo_line(line, date):
         line = skip_char('%', line)
         tag = line.strip()
     
-    return TodoItem(name=todo_name, duration=time_duration, finished=done, tag=tag, date=date)
+    return TodoItem(name=todo_name, duration=time_duration, finished=done, tag=tag)
 
 
-def read_todo_lines(lines, date):
+def read_todo_lines(lines):
     """ Parses a list of lines from a todo file into a list of TodoItem(s)
 
     SYNTAX = 
@@ -193,7 +201,7 @@ def read_todo_lines(lines, date):
 
         # parse a todo item
         elif spl[0] == '#':
-            todo_item = parse_todo_line(line, date)
+            todo_item = parse_todo_line(line)
             
             todos.append(todo_item)
 
@@ -206,6 +214,11 @@ def read_todo_lines(lines, date):
 def get_log_filename():
     date = datetime.date.today()
     return "{}_log.txt".format(date)
+
+def get_last_seven_days_filenames():
+    for i in [6,5,4,3,2,1,0]:
+        d = datetime.date.today() - datetime.timedelta(days=i)
+        yield '{}_log.txt'.format(d)
 
 def save_todo_log(todos):
     f = get_log_filename()
@@ -221,27 +234,76 @@ def serialize_todos(todos, repl=False):
     res = ""
     for idx, todo in enumerate(todos):
         if repl:
-            res += "({}) ".format(idx)
+            res += "({}) ".format(idx).rjust(5)
         res += "# {}\n".format(todo)
 
     return res
 
+def read_todo_file_if_exists(f, backup_f=None):
+    if os.path.exists(f):
+        return read_todo_file(f)
+    if backup_f:
+        return read_todo_file(backup_f)
 
 def read_cur_todo_log(todo_list_file):
     # if log for today exists, read that instead of the original todo list
     f = get_log_filename()
-    if not os.path.exists(f):
-        f = todo_list_file
-    cur_date = datetime.date.today()
-    return read_todo_file(f, cur_date)
+    return read_todo_file_if_exists(f, todo_list_file)
+    
 
-def read_todo_file(file, date):
+def read_todo_file(file):
     def inner():
         with open(file) as f:
-            return read_todo_lines((line for line in f), date)
+            return read_todo_lines((line for line in f))
 
     return cache_fetch_or_calculate(file, inner)
 
+command_metadata = {
+    'list':            ([], 'list tasks'),
+    'toggle-complete': (['idx'], 'toggle completion of task'),
+    'set-time':        (['idx', 'time'], 'set duration of task'),
+    'duplicate':       (['idx'], 'duplicate a task'),
+    'new':             (['new-task'], 'create a new task'),
+    'delete':          (['idx'], 'delete a task'),
+    'time':            ([], 'show time spent today'),
+    'week-time':       ([], 'print time for the last week'),
+    'cumulative-time': ([], 'show cumulative time for all days'),
+    'tags':            ([], 'show completed task tags for today'),
+    'cumulative-tags': ([], 'show completed task tags for all days'),
+    'quit':            ([], 'quit'),
+    'help':            ([], 'show this help information'),
+}
+
+def generate_help_str(raw_config):
+    #max_left_side = 0
+    #keyword_sz = 0
+    max_command_name = 0
+    max_params = 0
+    for cmd,keyword_list in raw_config.items():
+        params,desc = command_metadata[cmd]
+        keyword_sz = len('/'.join(keyword_list))
+        params_sz = len(' '.join('{'+param+'}' for param in params))
+        #max_left_side = max(max_left_side, sz)
+        max_command_name = max(max_command_name, keyword_sz)
+        max_params = max(max_params, params_sz)
+    s = ""
+    
+    for cmd,keyword_list in raw_config.items():
+        params,desc = command_metadata[cmd]
+        command_name = '/'.join(keyword_list).rjust(max_command_name)
+        params = ' '.join('{'+param+'}' for param in params).ljust(max_params)
+        
+        left_side = '{} {}'.format(
+            command_name,
+            params,
+        )
+        s += '{} - {}\n'.format(
+            left_side,#.ljust(max_left_side),
+            desc)
+
+    return s
+        
+        
 def read_config_file(cfg_file):
     if not os.path.exists(cfg_file):
         return DEFAULT_CONFIG
@@ -249,13 +311,15 @@ def read_config_file(cfg_file):
     with open(cfg_file) as f:
         raw_config = json.load(f)
 
+    help_str = generate_help_str(raw_config)
+
     cfg = {}
     for cmd,keyword_list in raw_config.items():
         for keyword in keyword_list:
             if keyword in cfg:
                 raise Exception("Duplicate key command '{}' in config".format(keyword))
             cfg[keyword] = cmd
-    return cfg
+    return cfg, help_str
     
 
 def calc_percentage(todos):
@@ -275,19 +339,33 @@ def calc_time(todos):
     
 
 def read_all_log_files():
-    return (read_todo_file(f, f.split("_log.txt")[0]) for f in os.listdir(".") if f.endswith("_log.txt"))
+    return (read_todo_file(f) for f in os.listdir(".") if f.endswith("_log.txt"))
+
+def read_last_weeks_logs():
+    for f in get_last_seven_days_filenames():
+        read = read_todo_file_if_exists(f)
+        if read:
+            yield read
+    
+def calc_time_in_range(todo_logs):
+    days = len(todo_logs)
+
+    times_a, times_b = itertools.tee(calc_time(todo_log) for todo_log in todo_logs)
+    completed, totals = (x[0] for x in times_a), (y[1] for y in times_b)
+
+    return sum(completed), sum(totals), days
 
 def calc_all_past_times():
     all_todo_logs = list(read_all_log_files())
-    days = len(all_todo_logs)
+    return calc_time_in_range(all_todo_logs)
 
-    times_a, times_b = itertools.tee(calc_time(todo_log) for todo_log in all_todo_logs)
-    completed, totals = (x[0] for x in times_a), (y[1] for y in times_b)
 
-    #return sum(calc_time(todo_log) for todo_log in all_todo_logs), days
-    return sum(completed), sum(totals), days
+def calc_last_week_time():
+    last_weeks_logs = list(read_last_weeks_logs())
+    res = calc_time_in_range(last_weeks_logs)
+    print(res)
+    return res
     
-
 def print_todos(todos):
     print(serialize_todos(todos, True))
     task_pct,time_pct = calc_percentage(todos)
@@ -311,7 +389,7 @@ def print_tags(todos):
 
 def print_all_tags():
     cnt_tbl,time_tbl = gather_all_tags()
-    print("All tags:")
+    print("Cumulative tags:")
     print_tags_inner(cnt_tbl, time_tbl)
 
 
@@ -347,7 +425,14 @@ def gather_all_tags():
 
 
 
-def repl(todo_list_file, config):
+def repl(todo_list_file, config, help_str):
+
+    print("""
+  .-----------------------------.
+  | Welcome to TodoTracker v{} |
+  .-----------------------------.
+"""
+    .format(VERSION))
     print_todos(read_cur_todo_log(todo_list_file))
     
     while True:
@@ -386,8 +471,7 @@ def repl(todo_list_file, config):
 
             def new_todo_item(todos):
                 l = line.split("{} ".format(op), 1)[1]
-                cur_date = datetime.date.today()
-                todo_item = parse_todo_line(l, cur_date)
+                todo_item = parse_todo_line(l)
                 todos.append(todo_item)
 
             def delete_todo_item(todos, idx):
@@ -401,7 +485,24 @@ def repl(todo_list_file, config):
                 hr,m = get_hr_min(completed)
                 thr,tm = get_hr_min(total)
                 print("Today's time: {}m / {}h{}m out of {}h{}m".format(completed, hr,m, thr,tm))
+                
+            def print_week_time():
+                comp_mins, total_mins, num_days = calc_last_week_time()
+                #completed,total,days = calc_all_past_times()
+                comp_hr,comp_rem_mins = get_hr_min(comp_mins)
 
+                mins_per_day = comp_mins/num_days
+                mins_per_7_days = comp_mins/7
+                
+                hrd,md = get_hr_min(mins_per_day)
+                whrd,wmd = get_hr_min(mins_per_7_days)
+
+                print("Cumulative time: {}m / {}h{}m over {} days studied".format(
+                    comp_mins, comp_hr, comp_rem_mins, num_days
+                ))
+                print("{}h{}m per days studied avg.".format(hrd, md))
+                print("{}h{}m per day of week avg.".format(whrd, wmd))
+                
             def print_cumulative_time():
                 comp_mins, total_mins, num_days = calc_all_past_times()
                 #completed,total,days = calc_all_past_times()
@@ -411,14 +512,11 @@ def repl(todo_list_file, config):
                 
                 hrd,md = get_hr_min(mins_per_day)
 
-                print("Cuulative time: {}m / {}h{}m over {} days".format(
+                print("Cumulative time: {}m / {}h{}m over {} days".format(
                     comp_mins, comp_hr, comp_rem_mins, num_days
                 ))
                 print("{}h{}m per day avg.".format(hrd, md))
                 
-            def cache_info(params):
-                print("cache hits/misses: {}/{}".format(cache_stats['hits'], cache_stats['misses']))
-
 
             def print_help(params):
                 print(
@@ -445,40 +543,25 @@ Syntax
     - Anything else is considered a comment.
                 
 """)
-                
-                print("  list                  - list todo items")
-                print("complete {num}          - complete a todo item")
-                print("      ct {num} {time}   - complete a todo item with a specified time in minutes")
-                print("    dupe {num}          - complete a duplicate of a todo item")
-                print("      uc {num}          - un-complete a todo item") 
-                print("     new {task-syntax}  - add a new task")
-                print("    time                - show time spent today")
-                print("   ctime                - show cumulative time for all days")
-                print("    tags                - show completed task tags for today")
-                print("   ctags                - show completed task tags for all days")
-                print("   cache-info           - show cache info")
-                print("    quit                - quit")
-                print("  h/help                - show this help screen")
-
+                print(help_str)
 
             cmd_table = {
                 'list': lambda params: print_todos(read_cur_todo_log(todo_list_file)),
-                'complete': todo_op(1, lambda todos, idx: todos[idx].complete()),
-                'uncomplete': todo_op(1, lambda todos, idx: todos[idx].uncomplete()),
+                'toggle-complete': todo_op(1, lambda todos, idx: todos[idx].toggle_complete()),
                 'duplicate': todo_op(1, duplicate),
                 'quit': lambda p: sys.exit(),
-                'complete-custom-duration': todo_op(
+                'set-time': todo_op(
                     2,
-                    lambda todos, idx, dur: todos[idx].complete_with_custom_duration(dur)
+                    lambda todos, idx, dur: todos[idx].set_duration(dur)
                 ),
                 'new': todo_op(0, new_todo_item),
                 'delete': todo_op(1, delete_todo_item),
                 
                 'time':            lambda params: print_time(),
+                'week-time':       lambda params: print_week_time(),
                 'cumulative-time': lambda params: print_cumulative_time(),
                 'tags':            lambda params: print_tags(read_cur_todo_log(todo_list_file)),
                 'cumulative-tags': lambda params: print_all_tags(),
-                'cache-info':      cache_info,
                 'help':            print_help,
                 
             
@@ -495,15 +578,16 @@ Syntax
             cmd_table[cmd_str](params)
             
         except Exception as e:
+            print(traceback.format_exc())
             print(str(e))
             
 
 def main(todo_list_file, config_file):
     todos = read_cur_todo_log(todo_list_file)
-    cfg = read_config_file(config_file)
+    cfg,help_str = read_config_file(config_file)
     save_todo_log(todos)
     
-    repl(todo_list_file=todo_list_file, config=cfg)
+    repl(todo_list_file=todo_list_file, config=cfg, help_str=help_str)
 
 
 parser = argparse.ArgumentParser(description='Track todo items and time.')

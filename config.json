@@ -1,16 +1,15 @@
 {
-    "list":            ["ls", "list"],
-    "complete":        ["c", "complete"],
-    "complete-custom-duration": ["ct", "complete-time"],
+    "list":            ["l", "ls", "list"],
+    "toggle-complete": ["c", "tc", "toggle-complete"],
+    "set-time":        ["st", "set-time"],
     "duplicate":       ["dupe", "duplicate"],
-    "uncomplete":      ["uc", "uncomplete"],
     "new":             ["new"],
     "delete":          ["del", "delete"],
     "time":            ["time"],
+    "week-time":       ["wtime", "week-time"],
     "cumulative-time": ["ctime", "cumulative-time"],
     "tags":            ["tags"],
     "cumulative-tags": ["ctags", "cumulative-tags"],
-    "cache-info":      ["cache"],
     "quit":            ["q", "quit"],
     "help":            ["h", "help"]
 }

@@ -9,6 +9,7 @@
     "week-time":       ["wtime", "week-time"],
     "cumulative-time": ["ctime", "cumulative-time"],
     "tags":            ["tags"],
+    "week-tags":       ["wtags", "week-tags"],
     "cumulative-tags": ["ctags", "cumulative-tags"],
     "quit":            ["q", "quit"],
     "help":            ["h", "help"]

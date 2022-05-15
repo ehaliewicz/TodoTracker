@@ -11,7 +11,7 @@ import timeit
 import traceback
 import time
 
-VERSION = "0.3"
+VERSION = "0.4"
 
 
 # new   - create new item
@@ -211,14 +211,20 @@ def read_todo_lines(lines):
 
     return todos
 
+def get_filename_for_date(date):
+    return "{}{}".format(date, LOG_FILE_SUFFIX)
+
+def get_date_for_filename(fn):
+    return fn.split(LOG_FILE_SUFFIX)[0]
+
 def get_log_filename():
     date = datetime.date.today()
-    return "{}_log.txt".format(date)
+    return get_filename_for_date(date)
 
 def get_last_seven_days_filenames():
     for i in [6,5,4,3,2,1,0]:
         d = datetime.date.today() - datetime.timedelta(days=i)
-        yield '{}_log.txt'.format(d)
+        yield get_filename_for_date(d)
 
 def save_todo_log(todos):
     f = get_log_filename()
@@ -270,6 +276,7 @@ command_metadata = {
     'cumulative-time': ([], 'show cumulative time for all days'),
     'tags':            ([], 'show completed task tags for today'),
     'cumulative-tags': ([], 'show completed task tags for all days'),
+    'week-tags':       ([], 'show completed task tags for the last week'),
     'quit':            ([], 'quit'),
     'help':            ([], 'show this help information'),
 }
@@ -336,10 +343,35 @@ def calc_time(todos):
     completed = sum(todo.time() for todo in todos)
     total = sum(todo.duration for todo in todos)
     return completed, total
-    
+
+LOG_FILE_SUFFIX = "_log.txt"
 
 def read_all_log_files():
-    return (read_todo_file(f) for f in os.listdir(".") if f.endswith("_log.txt"))
+    return (read_todo_file(f) for f in os.listdir(".") if f.endswith(LOG_FILE_SUFFIX))
+
+
+def read_all_log_files_with_date_tuple():
+    return ((read_todo_file(f), get_date_for_filename(f)) for f in os.listdir(".") if f.endswith(LOG_FILE_SUFFIX))
+
+def print_streak():
+    found_files = set()
+    
+    d = datetime.date.today()
+    streak = 0
+    while True:
+        file_for_date = get_filename_for_date(d)
+        if not os.path.exists(file_for_date):
+            break
+        todos = read_todo_file(file_for_date)
+        if not any(todo.finished for todo in todos):
+            break
+        
+        streak += 1
+        d = d - datetime.timedelta(days=1)
+
+    exclamation = '!' if streak > 7 else '' 
+    
+    print("Streak: {} days{}".format(streak, exclamation))
 
 def read_last_weeks_logs():
     for f in get_last_seven_days_filenames():
@@ -363,14 +395,13 @@ def calc_all_past_times():
 def calc_last_week_time():
     last_weeks_logs = list(read_last_weeks_logs())
     res = calc_time_in_range(last_weeks_logs)
-    print(res)
     return res
     
 def print_todos(todos):
     print(serialize_todos(todos, True))
     task_pct,time_pct = calc_percentage(todos)
     print("{:.2f}% tasks done".format(task_pct))
-    print("{:.2f}% time done".format(time_pct))
+    print("{:.2f}% time done, ".format(time_pct))
     
 def print_tags_inner(cnt_tbl, time_tbl):
     
@@ -392,6 +423,10 @@ def print_all_tags():
     print("Cumulative tags:")
     print_tags_inner(cnt_tbl, time_tbl)
 
+def print_week_tags():
+    cnt_tbl, time_tbl = gather_week_tags()
+    print("Last weeks tags:")
+    print_tags_inner(cnt_tbl, time_tbl)
 
 def gather_tags(todos):
     cnt_tbl = {}
@@ -421,6 +456,17 @@ def gather_all_tags():
         flat_todos += todos
 
     return gather_tags(flat_todos)
+
+def gather_week_tags():
+    all_todo_logs = read_last_weeks_logs()
+    
+    tbl = {}
+
+    flat_todos = []
+    for todos in all_todo_logs:
+        flat_todos += todos
+
+    return gather_tags(flat_todos)
     
 
 
@@ -429,11 +475,13 @@ def repl(todo_list_file, config, help_str):
 
     print("""
   .-----------------------------.
-  | Welcome to TodoTracker v{} |
+  | Welcome to TimeTracker v{} |
   .-----------------------------.
 """
     .format(VERSION))
     print_todos(read_cur_todo_log(todo_list_file))
+    
+    print_streak()
     
     while True:
 
@@ -521,7 +569,7 @@ def repl(todo_list_file, config, help_str):
             def print_help(params):
                 print(
 """
-                TODO TRACKER
+                TIME TRACKER
                 
 Parses a list of lines from a todo file, lets you mark them as complete, 
 and automatically creates logs to track historical progress.
@@ -559,6 +607,7 @@ Syntax
                 
                 'time':            lambda params: print_time(),
                 'week-time':       lambda params: print_week_time(),
+                'week-tags':       lambda params: print_week_tags(),
                 'cumulative-time': lambda params: print_cumulative_time(),
                 'tags':            lambda params: print_tags(read_cur_todo_log(todo_list_file)),
                 'cumulative-tags': lambda params: print_all_tags(),
@@ -597,3 +646,4 @@ parser.add_argument('--config', metavar='config_file', type=str, default='config
 if __name__ == '__main__':
     args = parser.parse_args()
     main(todo_list_file=args.todo, config_file=args.config)
+
